@@ -1,6 +1,7 @@
 from fastapi import FastAPI
 import requests
 import random
+import time
 import asyncio
 
 app = FastAPI()
@@ -33,13 +34,8 @@ iot_devices = [
 ]
 
 # Helper function to normalize sensor data
-# Helper function to normalize sensor data and prevent division by zero
 def normalize(sensor_value, min_val, max_val):
-    if min_val == max_val:
-        # In case min and max are the same, normalization doesn't make sense. Return 0.
-        return 0.0
     return (sensor_value - min_val) / (max_val - min_val)
-
 
 # Simulate sensor data
 def simulate_sensor_data():
@@ -62,9 +58,9 @@ def check_thresholds(sensor_data):
         return True
     return False
 
-
+# Send sensor data to ThingSpeak (asynchronous HTTP request)
 async def send_data_to_thingspeak(device, sensor_data):
-    API_KEY = "J9WI9QRNLJ7TSU88"
+    API_KEY = "VLV9JP4RV0U4QRZD"
     URL = "https://api.thingspeak.com/update"
     
     # Prepare normalized sensor data
@@ -104,7 +100,6 @@ async def send_data_to_thingspeak(device, sensor_data):
     if normalized_data['water_flow'] > WATER_FLOW_THRESHOLD:
         print(f"Alert: Water flow sensor breached the threshold ({normalized_data['water_flow']} > {WATER_FLOW_THRESHOLD})")
 
-
 # Trigger flood alert API call (asynchronous)
 async def call_flood_api(device):
     API_ENDPOINT = "https://jsonplaceholder.typicode.com/posts"
@@ -112,36 +107,43 @@ async def call_flood_api(device):
         "device_id": device["id"],
         "latitude": device["latitude"],
         "longitude": device["longitude"],
-        "message": "Flood threshold reached",
+        "message": "Manual flood alert triggered",
     }
-    response = await asyncio.to_thread(
-        requests.post, API_ENDPOINT, json=data
-    )
-    print(f"API called for Device {device['id']}: {response.status_code} - {response.text}")
+    response = requests.post(API_ENDPOINT, json=data)
+    print(f"Flood API called for Device {device['id']}: {response.status_code} - {response.text}")
 
-# Monitor IoT network in a continuous loop
+
+# Monitor IoT network (run sequentially without threads)
 async def monitor_iot_network():
-    while True:
-        for device in iot_devices:
-            sensor_data = simulate_sensor_data()
-            await send_data_to_thingspeak(device, sensor_data)
+    breached = False  # To track if any device has breached a threshold
+    latitude = None
+    longitude = None
+    
+    for device in iot_devices:
+        sensor_data = simulate_sensor_data()
+        await send_data_to_thingspeak(device, sensor_data)
+        
+        # Check thresholds
+        if check_thresholds(sensor_data):
+            print(f"Threshold breached at Device {device['id']}! Calling flood detection API.")
+            await call_flood_api(device)
             
-            # Check thresholds
-            if check_thresholds(sensor_data):
-                print(f"Threshold breached at Device {device['id']}! Calling flood detection API.")
-                await call_flood_api(device)
+            # Set the coordinates where the threshold was breached
+            latitude = device['latitude']
+            longitude = device['longitude']
+            breached = True
             
-            # Simulate a time delay between device checks (non-blocking)
-            await asyncio.sleep(5)  # 5-second delay between device checks
-            
-        # Wait a bit before restarting the loop
-        await asyncio.sleep(60)  # 1-minute delay before rechecking all devices
-
-# FastAPI startup event to begin monitoring
-@app.on_event("startup")
-async def startup_event():
-    print("Starting continuous IoT monitoring...")
-    asyncio.create_task(monitor_iot_network())  # Start the monitoring task in the background
+            # Optionally, break after the first breach
+            break
+        
+        # Simulate a time delay between device checks (non-blocking)
+        await asyncio.sleep(20)
+    
+    if breached:
+        return latitude, longitude
+    else:
+        # Return default values or None if no breach occurred
+        return None, None
 
 # FastAPI route for manual alert
 @app.post("/manual_alert/")
@@ -153,4 +155,14 @@ async def manual_alert(device_id: int):
         return {"latitude": device["latitude"], "longitude": device["longitude"]}
     else:
         return {"error": "Device not found"}
+
+# FastAPI route for automatic monitoring
+@app.get("/monitor/")
+async def monitor():
+    latitude, longitude = await monitor_iot_network()
+    
+    if latitude is not None and longitude is not None:
+        return {"message": "Flood detected", "latitude": latitude, "longitude": longitude}
+    else:
+        return {"message": "No flood detected", "latitude": None, "longitude": None}
 
