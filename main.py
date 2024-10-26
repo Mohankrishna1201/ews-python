@@ -6,7 +6,7 @@ import asyncio
 
 app = FastAPI()
 
-# Thresholds for alerting
+# Thresholds for alertin
 TEMP_THRESHOLD = 0.95
 WATER_LEVEL_THRESHOLD = 0.96
 WATER_FLOW_THRESHOLD = 0.95
