@@ -85,6 +85,9 @@ async def send_data_to_thingspeak(device, sensor_data):
             'field4': normalized_data['water_flow'],
             'field5': normalized_data['rainfall'],
             'field6': normalized_data['water_pressure'],
+             'field7': device['latitude'],  
+            'field8': device['longitude']
+
         }
     )
     
